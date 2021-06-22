@@ -40,6 +40,7 @@ CLIENT_SECRET = "iU5ohAF2qcqrujegE3hQ1cPt"
 class Backend(BaseBackend):
     name = 'bigquery'
     kind = 'sql'
+    client = BigQueryClient
     builder = BigQueryQueryBuilder
     translator = BigQueryExprTranslator
     query_class = BigQueryQuery
