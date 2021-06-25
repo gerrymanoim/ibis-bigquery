@@ -21,7 +21,79 @@ import pandas as pd
 import regex as re
 from google.api_core.client_info import ClientInfo
 from google.api_core.exceptions import NotFound
-from ibis.client import Database, Query, SQLClient
+try:
+    from ibis.client import Database, Query, SQLClient
+except (ImportError, ModuleNotFoundError):
+    from ibis.backends.base import Database
+    from ibis.backends.base.sql import SQLClient
+
+    class Query:
+        """Abstraction for DML query execution.
+        This class enables queries, progress, and more
+        (for backends supporting such functionality).
+        """
+
+        def __init__(self, client, sql, **kwargs):
+            self.client = client
+
+            dml = getattr(sql, 'dml', sql)
+            self.expr = getattr(
+                dml, 'parent_expr', getattr(dml, 'table_set', None)
+            )
+
+            if not isinstance(sql, str):
+                self.compiled_sql = sql.compile()
+            else:
+                self.compiled_sql = sql
+
+            self.result_wrapper = getattr(dml, 'result_handler', None)
+            self.extra_options = kwargs
+
+        def execute(self, **kwargs):
+            """Execute a DML expression.
+            Returns
+            -------
+            output : input type dependent
+            Table expressions: pandas.DataFrame
+            Array expressions: pandas.Series
+            Scalar expressions: Python scalar value
+            """
+            # synchronous by default
+            with self.client._execute(
+                self.compiled_sql, results=True, **kwargs
+            ) as cur:
+                result = self._fetch(cur)
+
+            return self._wrap_result(result)
+
+        def _wrap_result(self, result):
+            if self.result_wrapper is not None:
+                result = self.result_wrapper(result)
+            return result
+
+        def _fetch(self, cursor):
+            raise NotImplementedError
+
+        def schema(self):
+            """Return the schema of the expression.
+            Returns
+            -------
+            Schema
+            Raises
+            ------
+            ValueError
+                if self.expr doesn't have a schema.
+            """
+            if isinstance(self.expr, (ir.TableExpr, ir.ExprList, sch.HasSchema)):
+                return self.expr.schema()
+            elif isinstance(self.expr, ir.ValueExpr):
+                return sch.schema([(self.expr.get_name(), self.expr.type())])
+            else:
+                raise ValueError(
+                    'Expression with type {} does not have a '
+                    'schema'.format(type(self.expr))
+                )
+
 from multipledispatch import Dispatcher
 from pkg_resources import parse_version
 
